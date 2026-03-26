@@ -5,7 +5,12 @@ import Swinject
 extension AutoISF {
     struct RootView: BaseView {
         let resolver: Resolver
-        @StateObject var state = StateModel()
+        @StateObject var state: StateModel
+
+        init(resolver: Resolver) {
+            self.resolver = resolver
+            _state = StateObject(wrappedValue: StateModel(resolver: resolver))
+        }
 
         @State var isPresented = false
         @State var description = Text("")
@@ -65,6 +70,7 @@ extension AutoISF {
                                 }
                         }.disabled(isPresented)
                     }
+
                 } header: { Text("Experimental").foregroundStyle(.red) }
 
                 if state.autoisf {
@@ -76,6 +82,19 @@ extension AutoISF {
                                         info(
                                             header: "Enable BG acceleration",
                                             body: "Enables the BG acceleration adaptions, adjusting ISF for accelerating/decelerating blood glucose.",
+                                            useGraphics: nil
+                                        )
+                                    }
+                            }.disabled(isPresented)
+                        }
+
+                        HStack {
+                            Toggle(isOn: $state.autocr) {
+                                Text("Enable Auto CR")
+                                    .onTapGesture {
+                                        info(
+                                            header: "Enable Auto CR",
+                                            body: "Highly Experimental!\n\nAdjusts your profile Carb Ratio each loop by the same amount as your profile ISF using autoISF settings.\n\nUse the bolus calculator with great care, this may cause dose recommendations to be too strong.\n\nAutoCR + autoISF can stack. Reduce autoISF aggressiveness first (e.g., lower max/weights), then enable AutoCR and monitor closely.",
                                             useGraphics: nil
                                         )
                                     }
@@ -159,7 +178,7 @@ extension AutoISF {
                         }
 
                         HStack {
-                            Text("ISF weight for higher BG")
+                            Text(NSLocalizedString("ISF weight for higher BG", comment: "") + " (bg)")
                                 .onTapGesture {
                                     info(
                                         header: "ISF weight for higher BG",
@@ -173,7 +192,7 @@ extension AutoISF {
                         }
 
                         HStack {
-                            Text("Duration Weight")
+                            Text(NSLocalizedString("Duration Weight", comment: "") + " (dura)")
                                 .onTapGesture {
                                     info(
                                         header: "Duration Weight",
@@ -201,7 +220,7 @@ extension AutoISF {
                         }
 
                         HStack {
-                            Text("ISF weight for postprandial BG rise")
+                            Text(NSLocalizedString("ISF weight for postprandial BG rise", comment: "") + " (pp)")
                                 .onTapGesture {
                                     info(
                                         header: "ISF weight for postprandial BG rise",
@@ -215,7 +234,7 @@ extension AutoISF {
                         }
 
                         HStack {
-                            Text("ISF weight while BG accelerates")
+                            Text(NSLocalizedString("ISF weight while BG accelerates", comment: "") + " (acce)")
                                 .onTapGesture {
                                     info(
                                         header: "ISF weight while BG accelerates",
@@ -460,11 +479,11 @@ extension AutoISF {
                 if scrollView { infoScrollView() } else { infoView() }
             }
             .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-            .onAppear(perform: configureView)
             .navigationBarTitle("Auto ISF")
             .navigationBarTitleDisplayMode(.automatic)
             .sheet(isPresented: $presentHistory) {
                 AutoISFHistoryView(units: state.units)
+                    .environment(\.colorScheme, colorScheme)
             }
         }
 
@@ -533,7 +552,7 @@ extension AutoISF {
             }
 
             .padding(.all, 20)
-            .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+            .foregroundStyle(colorScheme == .dark ? IAPSconfig.previewBackgroundLight : IAPSconfig.previewBackgroundDark)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(colorScheme == .dark ? Color(.black).opacity(0.3) : Color(.white))

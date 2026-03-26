@@ -8,7 +8,7 @@ extension Bolus {
         let resolver: Resolver
         let waitForSuggestion: Bool
         let fetch: Bool
-        @StateObject var state: StateModel
+        @EnvironmentObject var state: StateModel
         @State private var showInfo = false
         @State private var exceededMaxBolus = false
         @State private var keepForNextWiew: Bool = false
@@ -26,6 +26,22 @@ extension Bolus {
 
         let meal: FetchedResults<Meals>
         let mealEntries: any View
+
+        init(
+            resolver: Resolver,
+            waitForSuggestion: Bool,
+            fetch: Bool,
+//            state: StateModel,
+            meal: FetchedResults<Meals>,
+            mealEntries: any View
+        ) {
+            self.resolver = resolver
+            self.waitForSuggestion = waitForSuggestion
+            self.fetch = fetch
+//            self.state = state
+            self.meal = meal
+            self.mealEntries = mealEntries
+        }
 
         private var formatter: NumberFormatter {
             let formatter = NumberFormatter()
@@ -68,7 +84,7 @@ extension Bolus {
                     }
                 }
 
-                if state.predictions == nil {
+                if state.predictions == nil || state.currentBG == 0 {
                     if state.currentBG == 0 {
                         Section {
                             HStack {
@@ -84,7 +100,7 @@ extension Bolus {
                             }.onChange(of: state.manualGlucose) {
                                 state.insulinCalculated = state.calculateInsulin()
                             }
-                        } header: { Text("Missing Glucose") }
+                        } header: { Text("New Glucose Missing") }
                     }
                 }
 
@@ -205,6 +221,9 @@ extension Bolus {
                             keepForNextWiew = true
                             state.save()
                             state.showModal(for: nil)
+                            if state.currentBG == 0, state.manualGlucose != 0 {
+                                state.addManualGlucose()
+                            }
                         }
                         label: {
                             fetch ?
@@ -250,13 +269,12 @@ extension Bolus {
                 label: { Text("Cancel") }
             )
             .onAppear {
-                configureView {
-                    state.viewActive()
-                    state.waitForCarbs = fetch
-                    state.waitForSuggestionInitial = waitForSuggestion
-                    state.waitForSuggestion = waitForSuggestion
-                    state.insulinCalculated = state.calculateInsulin()
-                }
+                state.viewActive()
+                state.waitForCarbs = fetch
+                state.waitForSuggestionInitial = waitForSuggestion
+                state.waitForSuggestion = waitForSuggestion
+                state.insulinCalculated = state.calculateInsulin()
+                state.start()
             }
             .popup(isPresented: showInfo, alignment: .bottom, direction: .center, type: .default) {
                 illustrationView()
@@ -274,7 +292,8 @@ extension Bolus {
         }
 
         private var disabled: Bool {
-            state.amount <= 0 || state.amount > state.maxBolus
+            state.amount <= 0 || state.amount > state.maxBolus || state.amount <
+                state.minBolus || state.amount < state.bolusIncrement
         }
 
         var changed: Bool {
@@ -297,7 +316,6 @@ extension Bolus {
         private func illustrationView() -> some View {
             VStack {
                 IllustrationView(data: $state.data)
-
                 // Hide button
                 VStack {
                     Button { showInfo = false }

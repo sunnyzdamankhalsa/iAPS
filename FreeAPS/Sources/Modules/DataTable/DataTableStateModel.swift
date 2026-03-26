@@ -152,10 +152,16 @@ extension DataTable {
             }
         }
 
-        func deleteCarbs(_ date: Date) {
-            provider.deleteCarbs(date)
+        func deleteCarbs(_ treatment: Treatment, storage: Carbohydrates?) {
+            provider.deleteCarbs(treatment.creationDate)
 
-            if date.timeIntervalSinceNow > -2.hours.timeInterval {
+            // In need of CoreData deletion?
+            if let data = storage {
+                OverrideStorage().DeleteBatch(identifier: data.id, entity: "Carbohydrates")
+            }
+
+            // In need of a loop update?
+            if treatment.creationDate.timeIntervalSinceNow > -2.hours.timeInterval {
                 aps.determineBasalSync()
             }
         }
@@ -191,6 +197,8 @@ extension DataTable {
                 sgv: Int(glucose),
                 date: Decimal(now.timeIntervalSince1970) * 1000,
                 dateString: now,
+                unfiltered: glucose,
+                uncalibrated: glucose,
                 glucose: Int(glucose),
                 type: GlucoseType.manual.rawValue
             )

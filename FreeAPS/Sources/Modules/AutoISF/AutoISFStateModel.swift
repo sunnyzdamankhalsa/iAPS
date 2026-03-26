@@ -6,6 +6,7 @@ extension AutoISF {
         @Injected() var storage: FileStorage!
 
         @Published var autoisf: Bool = false
+        @Published var autocr: Bool = false
         @Published var enableBGacceleration: Bool = true
         @Published var use_B30 = false
 
@@ -17,7 +18,7 @@ extension AutoISF {
         @Published var autoISFhourlyChange: Decimal = 1
         @Published var higherISFrangeWeight: Decimal = 0
         @Published var lowerISFrangeWeight: Decimal = 0
-        @Published var postMealISFweight: Decimal = 0.01
+        @Published var postMealISFweight: Decimal = 0
         @Published var bgAccelISFweight: Decimal = 0
         @Published var bgBrakeISFweight: Decimal = 0.10
         @Published var iobThresholdPercent: Decimal = 100
@@ -42,6 +43,7 @@ extension AutoISF {
 
         override func subscribe() {
             subscribeSetting(\.autoisf, on: $autoisf) { autoisf = $0 }
+            subscribeSetting(\.autocr, on: $autocr) { autocr = $0 }
             subscribeSetting(\.enableBGacceleration, on: $enableBGacceleration) { enableBGacceleration = $0 }
             subscribeSetting(\.smbDeliveryRatioBGrange, on: $smbDeliveryRatioBGrange) { smbDeliveryRatioBGrange = $0 }
 

@@ -3,6 +3,7 @@ import Foundation
 extension Bolus {
     final class Provider: BaseProvider, BolusProvider {
         @Injected() var pumpHistoryStorage: PumpHistoryStorage!
+        @Injected() var glucoseStorage: GlucoseStorage!
 
         let coreDataStorage = CoreDataStorage()
 
@@ -13,7 +14,7 @@ extension Bolus {
         func pumpSettings() -> PumpSettings {
             storage.retrieve(OpenAPS.Settings.settings, as: PumpSettings.self)
                 ?? PumpSettings(from: OpenAPS.defaults(for: OpenAPS.Settings.settings))
-                ?? PumpSettings(insulinActionCurve: 6, maxBolus: 10, maxBasal: 2)
+                ?? PumpSettings(insulinActionCurve: 6, maxBolus: 10, maxBasal: 4)
         }
 
         func fetchGlucose() -> [Readings] {

@@ -1,5 +1,7 @@
 import Combine
 import CoreData
+import LibreTransmitter
+import LoopKit
 import LoopKitUI
 import SwiftDate
 import SwiftUI
@@ -7,6 +9,8 @@ import SwiftUI
 extension Home {
     final class StateModel: BaseStateModel<Provider> {
         @Injected() var broadcaster: Broadcaster!
+        @Injected() var appCoordinator: AppCoordinator!
+        @Injected() var deviceDataManager: DeviceDataManager!
         @Injected() var apsManager: APSManager!
         @Injected() var nightscoutManager: NightscoutManager!
         @Injected() var storage: TempTargetsStorage!
@@ -71,26 +75,29 @@ extension Home {
         @Published var skipGlucoseChart: Bool = false
         @Published var displayDelta: Bool = false
         @Published var openAPSSettings: Preferences?
-        @Published var extended = true
         @Published var maxIOB: Decimal = 0
         @Published var maxCOB: Decimal = 0
         @Published var autoisf = false
         @Published var displayExpiration = false
-        @Published var cgm: CGMType = .nightscout
+        @Published var displaySAGE = true
         @Published var sensorDays: Double = 10
-        @Published var anubis: Bool = false
+        @Published var carbButton: Bool = true
+        @Published var profileButton: Bool = true
+        @Published var mealData = MealData()
 
         // Chart data
         var data = ChartModel(
             suggestion: nil,
             glucose: [],
+            activity: [],
+            cob: [],
             isManual: [],
             tempBasals: [],
             boluses: [],
             suspensions: [],
             announcement: [],
             hours: 24,
-            maxBasal: 2,
+            maxBasal: 4,
             autotunedBasalProfile: [],
             basalProfile: [],
             tempTargets: [],
@@ -105,18 +112,37 @@ extension Home {
             thresholdLines: true,
             overrideHistory: [],
             minimumSMB: 0,
+            insulinDIA: 7,
+            insulinPeak: 75,
             maxBolus: 0,
             maxBolusValue: 1,
+            maxCarbsValue: 1,
+            maxIOB: 0,
+            maxCOB: 1,
             useInsulinBars: true,
             screenHours: 6,
             fpus: true,
-            fpuAmounts: false
+            fpuAmounts: false,
+            showInsulinActivity: false,
+            showCobChart: false,
+            iob: nil,
+            hidePredictions: false,
+            useCarbBars: false
         )
+
+        func startTimer() {
+            timer.resume()
+        }
+
+        func stopTimer() {
+            timer.suspend()
+        }
 
         override func subscribe() {
             setupGlucose()
             setupBasals()
             setupBoluses()
+            setupActivity()
             setupSuspensions()
             setupPumpSettings()
             setupBasalProfile()
@@ -129,6 +155,8 @@ extension Home {
             setupOverrideHistory()
             setupLoopStats()
             setupData()
+            setupCob()
+            setupMeals()
 
             data.suggestion = provider.suggestion
             dynamicVariables = provider.dynamicVariables
@@ -152,26 +180,43 @@ extension Home {
             data.displayXgridLines = settingsManager.settings.xGridLines
             data.displayYgridLines = settingsManager.settings.yGridLines
             data.thresholdLines = settingsManager.settings.rulerMarks
+            data.showInsulinActivity = settingsManager.settings.showInsulinActivity
+            data.showCobChart = settingsManager.settings.showCobChart
             useTargetButton = settingsManager.settings.useTargetButton
             data.screenHours = settingsManager.settings.hours
             alwaysUseColors = settingsManager.settings.alwaysUseColors
             useCalc = settingsManager.settings.useCalc
             data.minimumSMB = settingsManager.settings.minimumSMB
+            data.insulinDIA = settingsManager.pumpSettings.insulinActionCurve
+            data.insulinPeak = settingsManager.preferences.useCustomPeakTime ? settingsManager.preferences.insulinPeakTime :
+                (settingsManager.preferences.curve == .ultraRapid ? 55 : 75)
+
             data.maxBolus = settingsManager.pumpSettings.maxBolus
+            data.maxIOB = settingsManager.preferences.maxIOB
+            data.maxCOB = settingsManager.preferences.maxCOB
             data.useInsulinBars = settingsManager.settings.useInsulinBars
             data.fpus = settingsManager.settings.fpus
             data.fpuAmounts = settingsManager.settings.fpuAmounts
+            data.hidePredictions = settingsManager.settings.hidePredictions
+            data.useCarbBars = settingsManager.settings.useCarbBars
             skipGlucoseChart = settingsManager.settings.skipGlucoseChart
             displayDelta = settingsManager.settings.displayDelta
-            extended = settingsManager.settings.extendHomeView
             maxIOB = settingsManager.preferences.maxIOB
             maxCOB = settingsManager.preferences.maxCOB
             autoisf = settingsManager.settings.autoisf
             hours = settingsManager.settings.hours
             displayExpiration = settingsManager.settings.displayExpiration
-            cgm = settingsManager.settings.cgm
-            sensorDays = settingsManager.settings.sensorDays
-            anubis = settingsManager.settings.anubis
+            displaySAGE = settingsManager.settings.displaySAGE
+
+            updateSensorDays()
+
+            appCoordinator.$sensorDays
+                .receive(on: DispatchQueue.main)
+                .sink { _ in self.updateSensorDays() }
+                .store(in: &lifetime)
+
+            carbButton = settingsManager.settings.carbButton
+            profileButton = settingsManager.settings.profileButton
 
             broadcaster.register(GlucoseObserver.self, observer: self)
             broadcaster.register(SuggestionObserver.self, observer: self)
@@ -203,9 +248,8 @@ extension Home {
                     self?.setupCurrentTempTarget()
                 }
             }
-            timer.resume()
 
-            apsManager.isLooping
+            appCoordinator.isLooping
                 .receive(on: DispatchQueue.main)
                 .weakAssign(to: \.isLooping, on: self)
                 .store(in: &lifetime)
@@ -270,21 +314,28 @@ extension Home {
             $setupPump
                 .sink { [weak self] show in
                     guard let self = self else { return }
-                    if show, let pumpManager = self.provider.apsManager.pumpManager,
-                       let bluetoothProvider = self.provider.apsManager.bluetoothManager
+                    if show, let pumpManager = self.provider.deviceManager.pumpManager
                     {
-                        let view = PumpConfig.PumpSettingsView(
-                            pumpManager: pumpManager,
-                            bluetoothManager: bluetoothProvider,
-                            completionDelegate: self,
-                            setupDelegate: self
-                        ).asAny()
-                        self.router.mainSecondaryModalView.send(view)
+                        if pumpManager.isOnboarded {
+                            let view = PumpConfig.PumpSettingsView(
+                                pumpManager: pumpManager,
+                                deviceManager: self.provider.deviceManager,
+                                completionDelegate: self,
+                            ).asAny()
+                            self.router.mainSecondaryModalView.send(view)
+                        } else {
+                            self.router.mainSecondaryModalView.send(nil)
+                            showModal(for: .pumpConfig)
+                        }
                     } else {
                         self.router.mainSecondaryModalView.send(nil)
                     }
                 }
                 .store(in: &lifetime)
+        }
+
+        private func updateSensorDays() {
+            sensorDays = appCoordinator.sensorDays ?? settingsManager.settings.sensorDays
         }
 
         func addCarbs() {
@@ -365,9 +416,12 @@ extension Home {
                 self.readings = CoreDataStorage().fetchGlucose(interval: DateFilter().today)
                 self.recentGlucose = self.data.glucose.last
                 if self.data.glucose.count >= 2 {
-                    self
-                        .glucoseDelta = (self.recentGlucose?.glucose ?? 0) -
-                        (self.data.glucose[self.data.glucose.count - 2].glucose ?? 0)
+                    self.glucoseDelta =
+                        NSDecimalNumber(
+                            decimal:
+                            (self.recentGlucose?.unfiltered ?? 0) -
+                                (self.data.glucose[self.data.glucose.count - 2].unfiltered ?? 0)
+                        ).intValue
                 } else {
                     self.glucoseDelta = nil
                 }
@@ -425,6 +479,20 @@ extension Home {
             }
         }
 
+        private func setupActivity() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.data.activity = CoreDataStorage().fetchInsulinData(interval: DateFilter().day)
+            }
+        }
+
+        private func setupCob() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.data.cob = self.iobData
+            }
+        }
+
         private func setupPumpSettings() {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -452,6 +520,7 @@ extension Home {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 self.data.carbs = self.provider.carbs(hours: self.filteredHours)
+                self.data.maxCarbsValue = self.data.carbs.compactMap(\.carbs).max() ?? 1
             }
         }
 
@@ -544,6 +613,19 @@ extension Home {
             }
         }
 
+        private func setupIOB() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                Task {
+                    do {
+                        if let sync = try await self.provider.iob() {
+                            self.data.iob = sync
+                        }
+                    } catch { debug(.apsManager, "Error - Couldn't update foreground IOB value.") }
+                }
+            }
+        }
+
         private func setupData() {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -576,19 +658,64 @@ extension Home {
             }
         }
 
-        func openCGM() {
-            guard var url = nightscoutManager.cgmURL else { return }
-
-            switch url.absoluteString {
-            case "http://127.0.0.1:1979":
-                url = URL(string: "spikeapp://")!
-            case "http://127.0.0.1:17580":
-                url = URL(string: "diabox://")!
-            case CGMType.libreTransmitter.appURL?.absoluteString:
-                showModal(for: .libreConfig)
-            default: break
+        private func setupMeals() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let data = self.provider.fetchedMeals
+                self.mealData.carbs = self.carbCount(data)
+                self.mealData.fat = self.fatCount(data)
+                self.mealData.protein = self.proteinCount(data)
+                self.mealData.kcal = self.kcalCount()
+                self.mealData.servings = self.servingsCount(data)
             }
-            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        }
+
+        private func carbCount(_ fetchedMeals: [Carbohydrates]) -> Decimal {
+            fetchedMeals
+                .compactMap(\.carbs)
+                .map({ x in
+                    x as Decimal
+                }).reduce(0, +)
+        }
+
+        private func fatCount(_ fetchedMeals: [Carbohydrates]) -> Decimal {
+            fetchedMeals
+                .compactMap(\.fat)
+                .map({ x in
+                    x as Decimal
+                }).reduce(0, +)
+        }
+
+        private func proteinCount(_ fetchedMeals: [Carbohydrates]) -> Decimal {
+            fetchedMeals
+                .compactMap(\.protein)
+                .map({ x in
+                    x as Decimal
+                }).reduce(0, +)
+        }
+
+        private func servingsCount(_ fetchedMeals: [Carbohydrates]) -> Int {
+            fetchedMeals.count
+        }
+
+        private func kcalCount() -> Decimal {
+            4 * (mealData.carbs + mealData.protein) + mealData.fat * 9
+        }
+
+        func openCGM() {
+            if let cgm = provider.deviceManager.cgmManager {
+                if let url = cgm.appURL {
+                    // if app url is provided (nightscout, xDrip) - open it
+                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                } else if let cgm = cgm as? CGMManagerUI {
+                    let view = CGM.CGMSettingsView(
+                        cgmManager: cgm,
+                        deviceManager: provider.deviceManager,
+                        completionDelegate: self
+                    ).asAny()
+                    router.mainSecondaryModalView.send(view)
+                }
+            }
         }
 
         func infoPanelTTPercentage(_ hbt_: Double, _ target: Decimal) -> Decimal {
@@ -623,11 +750,14 @@ extension Home.StateModel:
 
     func suggestionDidUpdate(_ suggestion: Suggestion) {
         data.suggestion = suggestion
+        data.iob = data.suggestion?.iob
         carbsRequired = suggestion.carbsReq
         setStatusTitle()
         setupOverrideHistory()
         setupLoopStats()
         setupData()
+        setupActivity()
+        setupCob()
     }
 
     func settingsDidChange(_ settings: FreeAPSSettings) {
@@ -644,6 +774,8 @@ extension Home.StateModel:
         data.displayXgridLines = settingsManager.settings.xGridLines
         data.displayYgridLines = settingsManager.settings.yGridLines
         data.thresholdLines = settingsManager.settings.rulerMarks
+        data.showInsulinActivity = settingsManager.settings.showInsulinActivity
+        data.showCobChart = settingsManager.settings.showCobChart
         useTargetButton = settingsManager.settings.useTargetButton
         data.screenHours = settingsManager.settings.hours
         alwaysUseColors = settingsManager.settings.alwaysUseColors
@@ -653,17 +785,21 @@ extension Home.StateModel:
         data.useInsulinBars = settingsManager.settings.useInsulinBars
         data.fpus = settingsManager.settings.fpus
         data.fpuAmounts = settingsManager.settings.fpuAmounts
+        data.hidePredictions = settingsManager.settings.hidePredictions
+        data.useCarbBars = settingsManager.settings.useCarbBars
         skipGlucoseChart = settingsManager.settings.skipGlucoseChart
         displayDelta = settingsManager.settings.displayDelta
-        extended = settingsManager.settings.extendHomeView
         maxIOB = settingsManager.preferences.maxIOB
         maxCOB = settingsManager.preferences.maxCOB
         autoisf = settingsManager.settings.autoisf
         hours = settingsManager.settings.hours
         displayExpiration = settingsManager.settings.displayExpiration
-        cgm = settingsManager.settings.cgm
-        sensorDays = settingsManager.settings.sensorDays
-        anubis = settingsManager.settings.anubis
+        displaySAGE = settingsManager.settings.displaySAGE
+//        cgm = settingsManager.settings.cgm
+        carbButton = settingsManager.settings.carbButton
+        profileButton = settingsManager.settings.profileButton
+        updateSensorDays()
+
         setupGlucose()
         setupOverrideHistory()
         setupData()
@@ -674,6 +810,8 @@ extension Home.StateModel:
         setupBoluses()
         setupSuspensions()
         setupAnnouncements()
+        setupIOB()
+        setupActivity()
     }
 
     func pumpSettingsDidChange(_: PumpSettings) {
@@ -691,6 +829,7 @@ extension Home.StateModel:
     func carbsDidUpdate(_: [CarbsEntry]) {
         setupCarbs()
         setupAnnouncements()
+        setupMeals()
     }
 
     func enactedSuggestionDidUpdate(_ suggestion: Suggestion) {
@@ -717,22 +856,5 @@ extension Home.StateModel:
 extension Home.StateModel: CompletionDelegate {
     func completionNotifyingDidComplete(_: CompletionNotifying) {
         setupPump = false
-    }
-}
-
-extension Home.StateModel: PumpManagerOnboardingDelegate {
-    func pumpManagerOnboarding(didCreatePumpManager pumpManager: PumpManagerUI) {
-        provider.apsManager.pumpManager = pumpManager
-        if let insulinType = pumpManager.status.insulinType {
-            settingsManager.updateInsulinCurve(insulinType)
-        }
-    }
-
-    func pumpManagerOnboarding(didOnboardPumpManager _: PumpManagerUI) {
-        // nothing to do
-    }
-
-    func pumpManagerOnboarding(didPauseOnboarding _: PumpManagerUI) {
-        // TODO:
     }
 }
