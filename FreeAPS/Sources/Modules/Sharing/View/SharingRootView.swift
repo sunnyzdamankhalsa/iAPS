@@ -37,6 +37,15 @@ extension Sharing {
         var body: some View {
             Form {
                 Section {
+                    Toggle("Upload Daily Log", isOn: $state.uploadLogs)
+                } header: { Text("Upload Daily Log") }
+                footer: {
+                    Text(
+                        "When enabled, the previous day's log file is automatically uploaded after midnight. Logs are used only to provide the multi-day analysis feature on open-iaps.app. Off by default."
+                    )
+                }
+
+                Section {
                     Toggle("Share and Backup all of your Settings and Statistics", isOn: $state.uploadStats)
                     if state.uploadStats {
                         Picker("Sex", selection: $state.sex) {

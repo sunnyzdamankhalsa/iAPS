@@ -59,6 +59,10 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
         settingsManager.settings.uploadStats
     }
 
+    private var isLogUploadEnabled: Bool {
+        settingsManager.settings.uploadLogs
+    }
+
     private var isUploadGlucoseEnabled: Bool {
         appCoordinator.shouldUploadGlucose
     }
@@ -90,6 +94,44 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
         _ = reachabilityManager.startListening(onQueue: processQueue) { status in
             debug(.nightscout, "Network status: \(status)")
         }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleLogRotation(_:)),
+            name: .logDidRotate,
+            object: nil
+        )
+    }
+
+    @objc private func handleLogRotation(_ notification: Notification) {
+        guard isLogUploadEnabled, isNetworkReachable else { return }
+        guard let logDate = notification.userInfo?["logDate"] as? Date else { return }
+
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "yyyy-MM-dd"
+        dateFmt.locale = Locale(identifier: "en_US_POSIX")
+        let dateString = dateFmt.string(from: logDate)
+        let appId = keychain.getIdentifier()
+
+        guard let logData = try? Data(contentsOf: URL(fileURLWithPath: SimpleLogReporter.logFilePrev)),
+              !logData.isEmpty
+        else {
+            debug(.nightscout, "Log upload skipped — log_prev.txt missing or empty")
+            return
+        }
+
+        let nightscout = NightscoutAPI(url: IAPSconfig.statURL)
+        nightscout.uploadLog(logData, logDate: dateString, appId: appId)
+            .sink(
+                receiveCompletion: { completion in
+                    if case let .failure(error) = completion {
+                        debug(.nightscout, "Log upload failed: \(error.localizedDescription)")
+                    }
+                },
+                receiveValue: { _ in
+                    debug(.nightscout, "Log upload succeeded for \(dateString)")
+                }
+            )
+            .store(in: &lifetime)
     }
 
     private func saveToCoreData(_ name: String) {
