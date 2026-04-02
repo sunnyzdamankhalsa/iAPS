@@ -18,6 +18,7 @@ protocol NightscoutManager {
     func uploadVersion(json: BareMinimum)
     func uploadPreferences(_ preferences: NightscoutPreferences)
     func uploadProfileAndSettings(_: Bool)
+    func uploadPreviousDayLog()
     func uploadOverride(_ profile: String, _ duration: Double, _ date: Date)
     func deleteAnnouncements()
     func deleteAllNSoverrrides()
@@ -130,6 +131,36 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
                 },
                 receiveValue: { _ in
                     debug(.nightscout, "Log upload succeeded for \(dateString)")
+                }
+            )
+            .store(in: &lifetime)
+    }
+
+    func uploadPreviousDayLog() {
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "yyyy-MM-dd"
+        dateFmt.locale = Locale(identifier: "en_US_POSIX")
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+        let dateString = dateFmt.string(from: yesterday)
+        let appId = keychain.getIdentifier()
+
+        guard let logData = try? Data(contentsOf: URL(fileURLWithPath: SimpleLogReporter.logFilePrev)),
+              !logData.isEmpty
+        else {
+            debug(.nightscout, "Manual log upload skipped — log_prev.txt missing or empty")
+            return
+        }
+
+        let nightscout = NightscoutAPI(url: IAPSconfig.statURL)
+        nightscout.uploadLog(logData, logDate: dateString, appId: appId)
+            .sink(
+                receiveCompletion: { completion in
+                    if case let .failure(error) = completion {
+                        debug(.nightscout, "Manual log upload failed: \(error.localizedDescription)")
+                    }
+                },
+                receiveValue: { _ in
+                    debug(.nightscout, "Manual log upload succeeded for \(dateString)")
                 }
             )
             .store(in: &lifetime)

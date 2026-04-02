@@ -124,6 +124,13 @@ extension Settings {
                                 }
 
                                 HStack {
+                                    Text("Upload Previous Day's Log")
+                                    Button("Upload") { state.uploadPreviousDayLog() }
+                                        .frame(maxWidth: .infinity, alignment: .trailing)
+                                        .buttonStyle(.borderedProminent)
+                                }
+
+                                HStack {
                                     Toggle("Allow diluted insulin concentration settings", isOn: $state.allowDilution)
                                 }
 
