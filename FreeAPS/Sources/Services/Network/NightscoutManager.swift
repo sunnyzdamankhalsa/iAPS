@@ -95,14 +95,15 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
             debug(.nightscout, "Network status: \(status)")
         }
         NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleLogRotation(_:)),
-            name: .logDidRotate,
-            object: nil
-        )
+            forName: .logDidRotate,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            self?.handleLogRotation(notification)
+        }
     }
 
-    @objc private func handleLogRotation(_ notification: Notification) {
+    private func handleLogRotation(_ notification: Notification) {
         guard isLogUploadEnabled, isNetworkReachable else { return }
         guard let logDate = notification.userInfo?["logDate"] as? Date else { return }
 
