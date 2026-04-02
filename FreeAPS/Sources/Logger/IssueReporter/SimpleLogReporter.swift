@@ -41,7 +41,7 @@ final class SimpleLogReporter: IssueReporter {
                 createFile(at: startOfDay)
                 // Notify interested parties that log_prev.txt is ready for upload
                 let prevDate = Calendar.current.date(byAdding: .day, value: -1, to: startOfDay)!
-                NotificationCenter.default.post(
+                Foundation.NotificationCenter.default.post(
                     name: .logDidRotate,
                     object: nil,
                     userInfo: ["logDate": prevDate]

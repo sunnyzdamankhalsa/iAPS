@@ -94,7 +94,7 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
         _ = reachabilityManager.startListening(onQueue: processQueue) { status in
             debug(.nightscout, "Network status: \(status)")
         }
-        NotificationCenter.default.addObserver(
+        Foundation.NotificationCenter.default.addObserver(
             forName: .logDidRotate,
             object: nil,
             queue: nil
