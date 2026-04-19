@@ -70,6 +70,12 @@ final class SimpleLogReporter: IssueReporter {
         getDocumentsDirectory().appendingPathComponent("logs/log_prev.txt").path
     }
 
+    /// Holds the log data for a day whose upload failed or could not be attempted.
+    /// Written when an upload is queued and deleted after a successful upload.
+    static var logFilePending: String {
+        getDocumentsDirectory().appendingPathComponent("logs/log_pending.txt").path
+    }
+
     static func getDocumentsDirectory() -> URL {
         let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
         let documentsDirectory = paths[0]
