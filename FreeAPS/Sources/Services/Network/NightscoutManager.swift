@@ -149,7 +149,10 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
             .sink(
                 receiveCompletion: { [weak self] completion in
                     if case let .failure(error) = completion {
-                        debug(.nightscout, "Log upload failed for \(dateString) (will retry on next network reconnect): \(error.localizedDescription)")
+                        debug(
+                            .nightscout,
+                            "Log upload failed for \(dateString) (will retry on next network reconnect): \(error.localizedDescription)"
+                        )
                         self?.savePendingUpload(date: dateString, data: logData)
                     }
                 },
