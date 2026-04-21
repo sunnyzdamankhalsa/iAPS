@@ -2879,7 +2879,7 @@ Ak potrebujete používať skratky na podanie bolusu, uistite sa, že v nastaven
 "Birth Date" = "Dátum narodenia";
 
 /* Share and Backup info text */
-"\nIf you enable \"Share and Backup\" daily backups of your settings and statistics will be made to online database.\n\nMake sure to copy and save your recovery token below. The recovery token is required to import your settings to another phone when using the onboarding view." = "\nAk povolíte funkciu \"Zdieľanie a zálohovanie\", vaše nastavenia a štatistiky budú denne zálohované do online databázy.\n\nNezabudnite si skopírovať a uložiť svoj obnovovací token uvedený nižšie. Tento token je potrebný na importovanie vašich nastavení do iného telefónu pri úvodnom zobrazení.";
+"\nIf you enable \"Share and Backup\" daily backups of your settings and statistics will be made to online database." = "\nAk povolíte funkciu \"Zdieľanie a zálohovanie\", vaše nastavenia a štatistiky budú denne zálohované do online databázy.\n\nNezabudnite si skopírovať a uložiť svoj obnovovací token uvedený nižšie. Tento token je potrebný na importovanie vašich nastavení do iného telefónu pri úvodnom zobrazení.";
 
 /* Section title if sharing off */
 "Share Bare Minimum" = "Zdieľať základné údaje";
