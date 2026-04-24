@@ -8,8 +8,8 @@ struct Preferences: JSON {
     var autosensMin: Decimal = 0.7
     var smbDeliveryRatio: Decimal = 0.5
     var rewindResetsAutosens: Bool = true
-    var highTemptargetRaisesSensitivity: Bool = true
-    var lowTemptargetLowersSensitivity: Bool = true
+    var highTemptargetRaisesSensitivity: Bool = false
+    var lowTemptargetLowersSensitivity: Bool = false
     var sensitivityRaisesTarget: Bool = true
     var resistanceLowersTarget: Bool = false
     var advTargetAdjustments: Bool = false
@@ -31,7 +31,7 @@ struct Preferences: JSON {
     var enableSMBAfterCarbs: Bool = false
     var allowSMBWithHighTemptarget: Bool = false
     var maxSMBBasalMinutes: Decimal = 30
-    var maxUAMSMBBasalMinutes: Decimal = 30
+    var maxUAMSMBBasalMinutes: Decimal = 75
     var smbInterval: Decimal = 3
     var bolusIncrement: Decimal = 0.1
     var curve: InsulinCurve = .rapidActing
@@ -39,24 +39,19 @@ struct Preferences: JSON {
     var insulinPeakTime: Decimal = 75
     var carbsReqThreshold: Decimal = 1.0
     var noisyCGMTargetMultiplier: Decimal = 1.3
-    var suspendZerosIOB: Bool = true
+    var suspendZerosIOB: Bool = false
     var timestamp: Date?
-    var maxDeltaBGthreshold: Decimal = 0.2
+    var maxDeltaBGthreshold: Decimal = 0.3
     var adjustmentFactor: Decimal = 0.5
     var sigmoid: Bool = false
     var enableDynamicCR: Bool = false
     var useNewFormula: Bool = false
     var useWeightedAverage: Bool = false
     var weightPercentage: Decimal = 0.65
-    var tddAdjBasal: Bool = false
     var enableSMB_high_bg: Bool = false
     var enableSMB_high_bg_target: Decimal = 110
     var threshold_setting: Decimal = 65
-    var high: Decimal = 10
-    var low: Decimal = 4
     var updateInterval: Decimal = 20
-    var overrideHbA1cUnit: Bool = false
-    var displayLoops: Bool = false
 }
 
 extension Preferences {
@@ -71,7 +66,7 @@ extension Preferences {
         case highTemptargetRaisesSensitivity = "high_temptarget_raises_sensitivity"
         case lowTemptargetLowersSensitivity = "low_temptarget_lowers_sensitivity"
         case sensitivityRaisesTarget = "sensitivity_raises_target"
-        case resistanceLowersTarget
+        case resistanceLowersTarget = "resistance_lowers_target"
         case advTargetAdjustments = "adv_target_adjustments"
         case exerciseMode = "exercise_mode"
         case halfBasalExerciseTarget = "half_basal_exercise_target"
@@ -107,15 +102,10 @@ extension Preferences {
         case useNewFormula
         case useWeightedAverage
         case weightPercentage
-        case tddAdjBasal
         case enableSMB_high_bg
         case enableSMB_high_bg_target
         case threshold_setting
-        case high
-        case low
         case updateInterval
-        case overrideHbA1cUnit
-        case displayLoops
     }
 }
 

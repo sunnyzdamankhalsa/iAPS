@@ -8,6 +8,8 @@ enum AwConfig: String, CaseIterable, Identifiable, Codable {
     case HR
     case BGTarget
     case steps
+    case isf
+    case override
 }
 
 class WatchStateModel: NSObject, ObservableObject {
@@ -26,12 +28,18 @@ class WatchStateModel: NSObject, ObservableObject {
     @Published var iob: Decimal?
     @Published var cob: Decimal?
     @Published var tempTargets: [TempTargetWatchPreset] = []
+    @Published var overrides: [OverridePresets_] = []
     @Published var bolusAfterCarbs = true
     @Published var isCarbsViewActive = false
+    @Published var isOverridesViewActive = false
     @Published var isTempTargetViewActive = false
     @Published var isBolusViewActive = false
     @Published var displayOnWatch: AwConfig = .BGTarget
+    @Published var displayFatAndProteinOnWatch = false
+    @Published var confirmBolusFaster = false
+    @Published var useNewCalc = false
     @Published var eventualBG = ""
+    @Published var profilesOrTempTargets = true
     @Published var isConfirmationViewActive = false {
         didSet {
             confirmationTimeout = nil
@@ -51,6 +59,13 @@ class WatchStateModel: NSObject, ObservableObject {
     @Published var lastUpdate: Date = .distantPast
     @Published var timerDate = Date()
     @Published var pendingBolus: Double?
+    @Published var isf: Decimal?
+    @Published var override: String?
+    @Published var target: Decimal?
+    @Published var carbRatio: Decimal?
+    @Published var eventualGlucose: Decimal?
+    @Published var deltaBG: Decimal?
+    @Published var minPredBG: Decimal?
 
     private var lifetime = Set<AnyCancellable>()
     private var confirmationTimeout: AnyCancellable?
@@ -64,11 +79,11 @@ class WatchStateModel: NSObject, ObservableObject {
         session.activate()
     }
 
-    func addCarbs(_ carbs: Int) {
+    func addMeal(_ carbs: Int, fat: Int, protein: Int) {
         confirmationSuccess = nil
         isConfirmationViewActive = true
         isCarbsViewActive = false
-        session.sendMessage(["carbs": carbs], replyHandler: { reply in
+        session.sendMessage(["carbs": carbs, "fat": fat, "protein": protein], replyHandler: { reply in
             self.completionHandler(reply)
             if let ok = reply["confirmation"] as? Bool, ok, self.bolusAfterCarbs {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -88,6 +103,18 @@ class WatchStateModel: NSObject, ObservableObject {
         isConfirmationViewActive = true
         isTempTargetViewActive = false
         session.sendMessage(["tempTarget": id], replyHandler: completionHandler) { error in
+            print(error.localizedDescription)
+            DispatchQueue.main.async {
+                self.confirmation(false)
+            }
+        }
+    }
+
+    func enactOverride(id: String) {
+        confirmationSuccess = nil
+        isConfirmationViewActive = true
+        isOverridesViewActive = false
+        session.sendMessage(["override": id], replyHandler: completionHandler) { error in
             print(error.localizedDescription)
             DispatchQueue.main.async {
                 self.confirmation(false)
@@ -164,10 +191,22 @@ class WatchStateModel: NSObject, ObservableObject {
         iob = state.iob
         cob = state.cob
         tempTargets = state.tempTargets
+        overrides = state.overrides
         bolusAfterCarbs = state.bolusAfterCarbs ?? true
         lastUpdate = Date()
         eventualBG = state.eventualBG ?? ""
         displayOnWatch = state.displayOnWatch ?? .BGTarget
+        displayFatAndProteinOnWatch = state.displayFatAndProteinOnWatch ?? false
+        confirmBolusFaster = state.confirmBolusFaster ?? false
+        profilesOrTempTargets = state.profilesOrTempTargets ?? true
+        useNewCalc = state.useNewCalc ?? false
+        isf = state.isf
+        target = state.target
+        carbRatio = state.carbRatio
+        deltaBG = state.deltaBG
+        minPredBG = state.minPredBG
+
+        override = state.override
     }
 }
 

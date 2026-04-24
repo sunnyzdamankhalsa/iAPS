@@ -15,7 +15,7 @@ struct AlertEntry: JSON, Codable, Hashable {
     let contentBody: String?
     var errorMessage: String?
 
-    static let manual = "freeaps-x"
+    static let manual = "iAPS"
 
     static func == (lhs: AlertEntry, rhs: AlertEntry) -> Bool {
         lhs.issuedDate == rhs.issuedDate
@@ -23,6 +23,17 @@ struct AlertEntry: JSON, Codable, Hashable {
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(issuedDate)
+    }
+
+    init(from alert: LoopKit.Alert) {
+        alertIdentifier = alert.identifier.alertIdentifier
+        primitiveInterruptionLevel = alert.interruptionLevel.storedValue as? Decimal
+        issuedDate = Date()
+        managerIdentifier = alert.identifier.managerIdentifier
+        triggerType = alert.trigger.storedType
+        triggerInterval = alert.trigger.storedInterval as? Decimal
+        contentTitle = alert.foregroundContent?.title
+        contentBody = alert.foregroundContent?.body
     }
 
     private enum CodingKeys: String, CodingKey {

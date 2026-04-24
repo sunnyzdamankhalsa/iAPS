@@ -1,4 +1,5 @@
 import Combine
+import CoreData
 import EventKit
 import Swinject
 
@@ -16,29 +17,57 @@ final class BaseCalendarManager: CalendarManager, Injectable {
     @Injected() private var settingsManager: SettingsManager!
     @Injected() private var broadcaster: Broadcaster!
     @Injected() private var glucoseStorage: GlucoseStorage!
+    @Injected() private var storage: FileStorage!
 
     init(resolver: Resolver) {
         injectServices(resolver)
         broadcaster.register(GlucoseObserver.self, observer: self)
+        broadcaster.register(SuggestionObserver.self, observer: self)
+        broadcaster.register(PumpHistoryObserver.self, observer: self)
         setupGlucose()
     }
+
+    let coredataContext = CoreDataStack.shared.persistentContainer.newBackgroundContext()
 
     func requestAccessIfNeeded() -> AnyPublisher<Bool, Never> {
         Future { promise in
             let status = EKEventStore.authorizationStatus(for: .event)
             switch status {
             case .notDetermined:
-                EKEventStore().requestAccess(to: .event) { granted, error in
-                    if let error = error {
-                        warning(.service, "Calendar access not granded", error: error)
+                #if swift(>=5.9)
+                    EKEventStore().requestFullAccessToEvents(completion: { (granted: Bool, error: Error?) -> Void in
+                        if let error = error {
+                            warning(.service, "Calendar access not granted", error: error)
+                        }
+                        promise(.success(granted))
+                    })
+                #else
+                    EKEventStore().requestAccess(to: .event) { granted, error in
+                        if let error = error {
+                            warning(.service, "Calendar access not granted", error: error)
+                        }
+                        promise(.success(granted))
                     }
-                    promise(.success(granted))
-                }
+                #endif
             case .denied,
                  .restricted:
                 promise(.success(false))
             case .authorized:
                 promise(.success(true))
+
+            #if swift(>=5.9)
+                case .fullAccess:
+                    promise(.success(true))
+                case .writeOnly:
+                    EKEventStore().requestFullAccessToEvents(completion: { (granted: Bool, error: Error?) -> Void in
+                        if let error = error {
+                            print("Calendar access not upgraded")
+                            warning(.service, "Calendar access not upgraded", error: error)
+                        }
+                        promise(.success(granted))
+                    })
+            #endif
+
             @unknown default:
                 warning(.service, "Unknown calendar access status")
                 promise(.success(false))
@@ -62,6 +91,25 @@ final class BaseCalendarManager: CalendarManager, Injectable {
         // create an event now
         let event = EKEvent(eventStore: eventStore)
 
+        // Calendar settings
+        let displeyCOBandIOB = settingsManager.settings.displayCalendarIOBandCOB
+        let displayEmojis = settingsManager.settings.displayCalendarEmojis
+
+        // Latest Loop data (from CoreData)
+        var freshLoop: Double = 20
+        var lastLoop: Reasons?
+        if displeyCOBandIOB || displayEmojis, let recentLoop = CoreDataStorage().fetchReason() {
+            lastLoop = recentLoop
+            freshLoop = -1 * (recentLoop.date ?? .distantPast).timeIntervalSinceNow.minutes
+        }
+
+        var glucoseIcon = "🟢"
+        if displayEmojis {
+            glucoseIcon = Double(glucoseValue) <= Double(settingsManager.settings.low) ? "🔴" : glucoseIcon
+            glucoseIcon = Double(glucoseValue) >= Double(settingsManager.settings.high) ? "🟠" : glucoseIcon
+            glucoseIcon = freshLoop > 15 ? "🚫" : glucoseIcon
+        }
+
         let glucoseText = glucoseFormatter
             .string(from: Double(
                 settingsManager.settings.units == .mmolL ?glucoseValue
@@ -74,9 +122,29 @@ final class BaseCalendarManager: CalendarManager, Injectable {
                     .string(from: Double(settingsManager.settings.units == .mmolL ? $0.asMmolL : Decimal($0)) as NSNumber)!
             } ?? "--"
 
-        let title = glucoseText + " " + directionText + " " + deltaText
+        let iobText = lastLoop != nil ? (iobFormatter.string(from: (lastLoop?.iob ?? 0) as NSNumber) ?? "") : ""
+        let cobText = lastLoop != nil ? (cobFormatter.string(from: (lastLoop?.cob ?? 0) as NSNumber) ?? "") : ""
 
-        event.title = title
+        var glucoseDisplayText = displayEmojis ? glucoseIcon + " " : ""
+        glucoseDisplayText += glucoseText + " " + directionText + " " + deltaText
+
+        var iobDisplayText = ""
+        var cobDisplayText = ""
+
+        if displeyCOBandIOB {
+            if displayEmojis {
+                iobDisplayText += "💉"
+                cobDisplayText += "🥨"
+            } else {
+                iobDisplayText += "IOB:"
+                cobDisplayText += "COB:"
+            }
+            iobDisplayText += " " + iobText
+            cobDisplayText += " " + cobText
+            event.location = iobDisplayText + " " + cobDisplayText
+        }
+
+        event.title = glucoseDisplayText
         event.notes = "iAPS"
         event.startDate = Date()
         event.endDate = Date(timeIntervalSinceNow: 60 * 10)
@@ -133,8 +201,22 @@ final class BaseCalendarManager: CalendarManager, Injectable {
         return formatter
     }
 
+    private var iobFormatter: NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 1
+        return formatter
+    }
+
+    private var cobFormatter: NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }
+
     func setupGlucose() {
-        let glucose = glucoseStorage.recent()
+        let glucose = glucoseStorage.retrieveRaw()
         let recentGlucose = glucose.last
         let glucoseDelta: Int?
         if glucose.count >= 2 {
@@ -146,7 +228,15 @@ final class BaseCalendarManager: CalendarManager, Injectable {
     }
 }
 
-extension BaseCalendarManager: GlucoseObserver {
+extension BaseCalendarManager: GlucoseObserver, SuggestionObserver, PumpHistoryObserver {
+    func pumpHistoryDidUpdate(_: [PumpHistoryEvent]) {
+        setupGlucose()
+    }
+
+    func suggestionDidUpdate(_: Suggestion) {
+        setupGlucose()
+    }
+
     func glucoseDidUpdate(_: [BloodGlucose]) {
         setupGlucose()
     }

@@ -7,216 +7,293 @@ extension AddCarbs {
         @Injected() var carbsStorage: CarbsStorage!
         @Injected() var apsManager: APSManager!
         @Injected() var settings: SettingsManager!
+        @Injected() var nightscoutManager: NightscoutManager!
+
         @Published var carbs: Decimal = 0
         @Published var date = Date()
         @Published var protein: Decimal = 0
         @Published var fat: Decimal = 0
         @Published var carbsRequired: Decimal?
-        @Published var useFPU: Bool = true
+        @Published var useFPUconversion: Bool = false
         @Published var dish: String = ""
         @Published var selection: Presets?
-        @Published var summation: [String] = []
+        @Published var maxCarbs: Decimal = 0
+        @Published var note: String = ""
+        @Published var id_: String = ""
+        @Published var skipBolus: Bool = false
+        @Published var id: String?
+        @Published var hypoTreatment = false
+        @Published var presetToEdit: Presets?
+        @Published var edit = false
+        @Published var ai = false
+
+        @Published var combinedPresets: [(preset: Presets?, portions: Double)] = []
+
+        let now = Date.now
 
         let coredataContext = CoreDataStack.shared.persistentContainer.viewContext
-        // @Environment(\.managedObjectContext) var moc
+        let coredataContextBackground = CoreDataStack.shared.persistentContainer.newBackgroundContext()
 
         override func subscribe() {
             carbsRequired = provider.suggestion?.carbsReq
-            useFPU = settingsManager.settings.useFPUconversion
+            id = settings.settings.profileID
+            maxCarbs = settings.settings.maxCarbs
+            skipBolus = settingsManager.settings.skipBolusScreenAfterCarbs
+            useFPUconversion = settingsManager.settings.useFPUconversion
+            ai = settingsManager.settings.ai
         }
 
-        func add() {
+        func add(_ continue_: Bool, fetch: Bool) {
             guard carbs > 0 || fat > 0 || protein > 0 else {
                 showModal(for: nil)
                 return
             }
+            carbs = min(carbs, maxCarbs)
+            id_ = UUID().uuidString
 
-            if useFPU {
-                // -------------------------- FPU--------------------------------------
-                let interval = settings.settings.minuteInterval // Interval betwwen carbs
-                let timeCap = settings.settings.timeCap // Max Duration
-                let adjustment = settings.settings.individualAdjustmentFactor
-                let delay = settings.settings.delay // Tme before first future carb entry
+            let carbsToStore = [CarbsEntry(
+                id: id_,
+                createdAt: now,
+                actualDate: date,
+                carbs: carbs,
+                fat: fat,
+                protein: protein,
+                note: note,
+                enteredBy: CarbsEntry.manual,
+                isFPU: false
+            )]
+            add(continue_, fetch: fetch, carbsToStore: carbsToStore)
+        }
 
-                let kcal = protein * 4 + fat * 9
-                let carbEquivalents = (kcal / 10) * adjustment
-                let fpus = carbEquivalents / 10
-
-                // Duration in hours used for extended boluses with Warsaw Method. Here used for total duration of the computed carbquivalents instead, excluding the configurable delay.
-                var computedDuration = 0
-                switch fpus {
-                case ..<2:
-                    computedDuration = 3
-                case 2 ..< 3:
-                    computedDuration = 4
-                case 3 ..< 4:
-                    computedDuration = 5
-                default:
-                    computedDuration = timeCap
-                }
-
-                // Size of each created carb equivalent if 60 minutes interval
-                var equivalent: Decimal = carbEquivalents / Decimal(computedDuration)
-                // Adjust for interval setting other than 60 minutes
-                equivalent /= Decimal(60 / interval)
-                // Round to 1 fraction digit
-                // equivalent = Decimal(round(Double(equivalent * 10) / 10))
-                let roundedEquivalent: Double = round(Double(equivalent * 10)) / 10
-                equivalent = Decimal(roundedEquivalent)
-                // Number of equivalents
-                var numberOfEquivalents = carbEquivalents / equivalent
-                // Only use delay in first loop
-                var firstIndex = true
-                // New date for each carb equivalent
-                var useDate = date
-                // Group and Identify all FPUs together
-                let fpuID = UUID().uuidString
-
-                // Create an array of all future carb equivalents.
-                var futureCarbArray = [CarbsEntry]()
-                while carbEquivalents > 0, numberOfEquivalents > 0 {
-                    if firstIndex {
-                        useDate = useDate.addingTimeInterval(delay.minutes.timeInterval)
-                        firstIndex = false
-                    } else { useDate = useDate.addingTimeInterval(interval.minutes.timeInterval) }
-
-                    let eachCarbEntry = CarbsEntry(
-                        id: UUID().uuidString, createdAt: useDate, carbs: equivalent, enteredBy: CarbsEntry.manual, isFPU: true,
-                        fpuID: fpuID
-                    )
-                    futureCarbArray.append(eachCarbEntry)
-                    numberOfEquivalents -= 1
-                }
-                // Save the array
-                if carbEquivalents > 0 {
-                    carbsStorage.storeCarbs(futureCarbArray)
-                }
-            } // ------------------------- END OF TPU ----------------------------------------
-
-            // Store the real carbs
-            if carbs > 0 {
-                carbsStorage
-                    .storeCarbs([CarbsEntry(
-                        id: UUID().uuidString,
-                        createdAt: date,
-                        carbs: carbs,
-                        enteredBy: CarbsEntry.manual,
-                        isFPU: false, fpuID: nil
-                    )])
+        func addAIFood(_ continue_: Bool, fetch: Bool, food: FoodItemDetailed, date: Date?) {
+            var carbs = food.nutrientInThisPortion(.carbs) ?? 0
+            let fat = food.nutrientInThisPortion(.fat) ?? 0
+            let protein = food.nutrientInThisPortion(.protein) ?? 0
+            guard carbs > 0 || fat > 0 || protein > 0 else {
+                showModal(for: nil)
+                return
             }
+            carbs = min(carbs, maxCarbs)
+            id_ = UUID().uuidString
 
-            if settingsManager.settings.skipBolusScreenAfterCarbs {
+            let carbsToStore = [CarbsEntry(
+                id: id_,
+                createdAt: now,
+                actualDate: date,
+                carbs: carbs,
+                fat: fat,
+                protein: protein,
+                note: nil,
+                enteredBy: CarbsEntry.manual,
+                isFPU: false
+            )]
+            add(continue_, fetch: fetch, carbsToStore: carbsToStore)
+        }
+
+        func add(_ continue_: Bool, fetch: Bool, carbsToStore: [CarbsEntry]) {
+            if hypoTreatment { hypo() }
+            let carbs = carbsToStore.map(\.carbs).reduce(0, +)
+            let fat = carbsToStore.compactMap(\.fat).reduce(0, +)
+            let protein = carbsToStore.compactMap(\.protein).reduce(0, +)
+            let empty = carbs <= 0 && fat <= 0 && protein <= 0
+
+            if (skipBolus && !continue_ && !fetch) || hypoTreatment {
+                carbsStorage.storeCarbs(carbsToStore)
+                apsManager.determineBasalSync()
+                showModal(for: nil)
+            } else if carbs > 0 {
+                saveToCoreData(carbsToStore)
+                showModal(for: .bolus(waitForSuggestion: true, fetch: true))
+            } else if !empty {
+                carbsStorage.storeCarbs(carbsToStore)
                 apsManager.determineBasalSync()
                 showModal(for: nil)
             } else {
-                showModal(for: .bolus(waitForSuggestion: true))
+                hideModal()
             }
         }
 
         func deletePreset() {
             if selection != nil {
+                carbs -= ((selection?.carbs ?? 0) as NSDecimalNumber) as Decimal
+                fat -= ((selection?.fat ?? 0) as NSDecimalNumber) as Decimal
+                protein -= ((selection?.protein ?? 0) as NSDecimalNumber) as Decimal
                 try? coredataContext.delete(selection!)
                 try? coredataContext.save()
-                carbs = 0
-                fat = 0
-                protein = 0
             }
-            selection = nil
         }
 
         func removePresetFromNewMeal() {
-            let a = summation.firstIndex(where: { $0 == selection?.dish! })
-            if a != nil, summation[a ?? 0] != "" {
-                summation.remove(at: a!)
+            if let index = combinedPresets.firstIndex(where: { $0.preset == selection }) {
+                if combinedPresets[index].portions > 0.5 {
+                    combinedPresets[index].portions -= 0.5
+                } else if combinedPresets[index].portions == 0.5 {
+                    combinedPresets.remove(at: index)
+                    selection = nil
+                }
             }
         }
 
-        func addPresetToNewMeal() {
-            let test: String = selection?.dish ?? "dontAdd"
-            if test != "dontAdd" {
-                summation.append(test)
+        func addPresetToNewMeal(half: Bool = false) {
+            if let index = combinedPresets.firstIndex(where: { $0.preset == selection }) {
+                combinedPresets[index].portions += (half ? 0.5 : 1)
+            } else {
+                combinedPresets.append((selection, 1))
             }
         }
 
-        func addNewPresetToWaitersNotepad(_ dish: String) {
-            summation.append(dish)
-        }
-
-        func addToSummation() {
-            summation.append(selection?.dish ?? "")
-        }
-
-        func waitersNotepad() -> String {
-            var filteredArray = summation.filter { !$0.isEmpty }
+        func waitersNotepad() -> [String] {
+            guard combinedPresets.isNotEmpty else { return [] }
 
             if carbs == 0, protein == 0, fat == 0 {
-                filteredArray = []
+                return []
             }
 
-            guard filteredArray != [] else {
-                return ""
+            var presetsString: [String] = combinedPresets.map { item in
+                "\(item.portions) \(item.preset?.dish ?? "")"
             }
-            var carbs_: Decimal = 0.0
-            var fat_: Decimal = 0.0
-            var protein_: Decimal = 0.0
-            var presetArray = [Presets]()
 
-            coredataContext.performAndWait {
-                let requestPresets = Presets.fetchRequest() as NSFetchRequest<Presets>
-                try? presetArray = coredataContext.fetch(requestPresets)
-            }
-            var waitersNotepad = [String]()
-            var stringValue = ""
+            if presetsString.isNotEmpty {
+                let totCarbs = combinedPresets
+                    .compactMap({ each in (each.preset?.carbs ?? 0) as Decimal * Decimal(each.portions) })
+                    .reduce(0, +)
+                let totFat = combinedPresets.compactMap({ each in (each.preset?.fat ?? 0) as Decimal * Decimal(each.portions) })
+                    .reduce(0, +)
+                let totProtein = combinedPresets
+                    .compactMap({ each in (each.preset?.protein ?? 0) as Decimal * Decimal(each.portions) }).reduce(0, +)
+                let margins: Decimal = 1.8
 
-            for each in filteredArray {
-                let countedSet = NSCountedSet(array: filteredArray)
-                let count = countedSet.count(for: each)
-                if each != stringValue {
-                    waitersNotepad.append("\(count) \(each)")
+                if carbs > totCarbs + margins {
+                    presetsString.append("+ \(carbs - totCarbs) carbs")
+                } else if carbs + margins < totCarbs {
+                    presetsString.append("- \(totCarbs - carbs) carbs")
                 }
-                stringValue = each
 
-                for sel in presetArray {
-                    if sel.dish == each {
-                        carbs_ += (sel.carbs)! as Decimal
-                        fat_ += (sel.fat)! as Decimal
-                        protein_ += (sel.protein)! as Decimal
-                        break
+                if fat > totFat + margins {
+                    presetsString.append("+ \(fat - totFat) fat")
+                } else if fat + margins < totFat {
+                    presetsString.append("- \(totFat - fat) fat")
+                }
+
+                if protein > totProtein + margins {
+                    presetsString.append("+ \(protein - totProtein) protein")
+                } else if protein + margins < totProtein {
+                    presetsString.append("- \(totProtein - protein) protein")
+                }
+            }
+
+            return presetsString.removeDublicates()
+        }
+
+        func loadEntries(_ editMode: Bool) {
+            if editMode {
+                coredataContext.performAndWait {
+                    var mealToEdit = [Meals]()
+                    let requestMeal = Meals.fetchRequest() as NSFetchRequest<Meals>
+                    let sortMeal = NSSortDescriptor(key: "createdAt", ascending: false)
+                    requestMeal.sortDescriptors = [sortMeal]
+                    requestMeal.fetchLimit = 1
+                    try? mealToEdit = self.coredataContext.fetch(requestMeal)
+
+                    self.carbs = Decimal(mealToEdit.first?.carbs ?? 0)
+                    self.fat = Decimal(mealToEdit.first?.fat ?? 0)
+                    self.protein = Decimal(mealToEdit.first?.protein ?? 0)
+                    self.note = mealToEdit.first?.note ?? ""
+                    self.id_ = mealToEdit.first?.id ?? ""
+                }
+            }
+        }
+
+        func subtract() {
+            let presetCarbs = ((selection?.carbs ?? 0) as NSDecimalNumber) as Decimal
+            if carbs != 0, carbs - presetCarbs >= 0 {
+                carbs -= presetCarbs * 0.5
+            } else { carbs = 0 }
+
+            let presetFat = ((selection?.fat ?? 0) as NSDecimalNumber) as Decimal
+            if fat != 0, presetFat >= 0 {
+                fat -= presetFat * 0.5
+            } else { fat = 0 }
+
+            let presetProtein = ((selection?.protein ?? 0) as NSDecimalNumber) as Decimal
+            if protein != 0, presetProtein >= 0 {
+                protein -= presetProtein * 0.5
+            } else { protein = 0 }
+
+            removePresetFromNewMeal()
+        }
+
+        func plus() {
+            carbs += (((selection?.carbs ?? 0) as NSDecimalNumber) as Decimal * 0.5)
+            fat += (((selection?.fat ?? 0) as NSDecimalNumber) as Decimal * 0.5)
+            protein += (((selection?.protein ?? 0) as NSDecimalNumber) as Decimal * 0.5)
+            addPresetToNewMeal(half: true)
+        }
+
+        func addU(_ selection: Presets?) {
+            carbs += ((selection?.carbs ?? 0) as NSDecimalNumber) as Decimal
+            fat += ((selection?.fat ?? 0) as NSDecimalNumber) as Decimal
+            protein += ((selection?.protein ?? 0) as NSDecimalNumber) as Decimal
+            addPresetToNewMeal()
+        }
+
+        func saveToCoreData(_ stored: [CarbsEntry]) {
+            CoreDataStorage().saveMeal(stored, now: now)
+        }
+
+        private var empty: Bool {
+            carbs <= 0 && fat <= 0 && protein <= 0
+        }
+
+        private func hypo() {
+            let os = OverrideStorage()
+
+            // Cancel any eventual Other Override already active
+            if let activeOveride = os.fetchLatestOverride().first {
+                let presetName = os.isPresetName()
+                // Is the Override a Preset?
+                if let preset = presetName {
+                    if let duration = os.cancelProfile() {
+                        // Update in Nightscout
+                        nightscoutManager.editOverride(preset, duration, activeOveride.date ?? Date.now)
+                    }
+                } else if activeOveride.isPreset { // Because hard coded Hypo treatment isn't actually a preset
+                    if let duration = os.cancelProfile() {
+                        nightscoutManager.editOverride("📉", duration, activeOveride.date ?? Date.now)
+                    }
+                } else {
+                    let nsString = activeOveride.percentage.formatted() != "100" ? activeOveride.percentage
+                        .formatted() + " %" : "Custom"
+                    if let duration = os.cancelProfile() {
+                        nightscoutManager.editOverride(nsString, duration, activeOveride.date ?? Date.now)
                     }
                 }
             }
-            let extracarbs = carbs - carbs_
-            let extraFat = fat - fat_
-            let extraProtein = protein - protein_
-            var addedString = ""
 
-            if extracarbs > 0, filteredArray.isNotEmpty {
-                addedString += "Additional carbs: \(extracarbs) "
-            } else if extracarbs < 0 { addedString += "Removed carbs: \(extracarbs) " }
-
-            if extraFat > 0, filteredArray.isNotEmpty {
-                addedString += "Additional fat: \(extraFat) "
-            } else if extraFat < 0 { addedString += "Removed fat: \(extraFat) " }
-
-            if extraProtein > 0, filteredArray.isNotEmpty {
-                addedString += "Additional protein: \(extraProtein) "
-            } else if extraProtein < 0 { addedString += "Removed protein: \(extraProtein) " }
-
-            if addedString != "" {
-                waitersNotepad.append(addedString)
+            guard let profileID = id, profileID != "None" else {
+                return
             }
-            var waitersNotepadString = ""
-
-            if waitersNotepad.count == 1 {
-                waitersNotepadString = waitersNotepad[0]
-            } else if waitersNotepad.count > 1 {
-                for each in waitersNotepad {
-                    if each != waitersNotepad.last {
-                        waitersNotepadString += " " + each + ","
-                    } else { waitersNotepadString += " " + each }
-                }
+            // Enable New Override
+            if profileID == "Hypo Treatment" {
+                let override = OverridePresets(context: coredataContextBackground)
+                override.percentage = 90
+                override.smbIsOff = true
+                override.duration = 45
+                override.name = "📉"
+                override.advancedSettings = true
+                override.target = 117
+                override.date = Date.now
+                override.indefinite = false
+                os.overrideFromPreset(override, profileID)
+                // Upload to Nightscout
+                nightscoutManager.uploadOverride(
+                    "📉",
+                    Double(45),
+                    override.date ?? Date.now
+                )
+            } else {
+                os.activatePreset(profileID)
             }
-            return waitersNotepadString
         }
     }
 }

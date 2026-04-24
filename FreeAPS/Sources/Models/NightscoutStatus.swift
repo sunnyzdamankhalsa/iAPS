@@ -5,6 +5,7 @@ struct NightscoutStatus: JSON {
     let openaps: OpenAPSStatus
     let pump: NSPumpStatus
     let uploader: Uploader
+    let createdAt: Date
 }
 
 struct OpenAPSStatus: JSON {
@@ -29,7 +30,7 @@ struct Uploader: JSON {
 struct NightscoutTimevalue: JSON {
     let time: String
     let value: Decimal
-    let timeAsSeconds: Int
+    let timeAsSeconds: Int?
 }
 
 struct ScheduledNightscoutProfile: JSON {
@@ -50,6 +51,7 @@ struct NightscoutProfileStore: JSON {
     let startDate: Date
     let mills: Int
     let units: String
-    let enteredBy: String
+    var enteredBy: String
     let store: [String: ScheduledNightscoutProfile]
+    let profile: String?
 }

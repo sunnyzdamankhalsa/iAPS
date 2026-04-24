@@ -4,7 +4,7 @@ import Swinject
 extension CREditor {
     struct RootView: BaseView {
         let resolver: Resolver
-        @StateObject var state = StateModel()
+        @StateObject var state: StateModel
         @State private var editMode = EditMode.inactive
 
         private var dateFormatter: DateFormatter {
@@ -20,9 +20,14 @@ extension CREditor {
             return formatter
         }
 
+        init(resolver: Resolver) {
+            self.resolver = resolver
+            _state = StateObject(wrappedValue: StateModel(resolver: resolver))
+        }
+
         var body: some View {
             Form {
-                if let autotune = state.autotune {
+                if let autotune = state.autotune, !state.settingsManager.settings.onlyAutotuneBasals {
                     Section(header: Text("Autotune")) {
                         HStack {
                             Text("Calculated Ratio")
@@ -48,7 +53,7 @@ extension CREditor {
                     .disabled(state.items.isEmpty)
                 }
             }
-            .onAppear(perform: configureView)
+            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
             .navigationTitle("Carb Ratios")
             .navigationBarTitleDisplayMode(.automatic)
             .navigationBarItems(

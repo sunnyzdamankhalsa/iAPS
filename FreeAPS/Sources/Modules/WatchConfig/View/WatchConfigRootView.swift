@@ -4,7 +4,12 @@ import Swinject
 extension WatchConfig {
     struct RootView: BaseView {
         let resolver: Resolver
-        @StateObject var state = StateModel()
+        @StateObject var state: StateModel
+
+        init(resolver: Resolver) {
+            self.resolver = resolver
+            _state = StateObject(wrappedValue: StateModel(resolver: resolver))
+        }
 
         var body: some View {
             Form {
@@ -18,6 +23,15 @@ extension WatchConfig {
                         }
                     }
                 }
+
+                Toggle("Display Protein & Fat", isOn: $state.displayFatAndProteinOnWatch)
+
+                Toggle("Confirm Bolus Faster", isOn: $state.confirmBolusFaster)
+
+                Section {
+                    Toggle("Profile Overrides Button / Temp Targets Button", isOn: $state.profilesOrTempTargets)
+                } header: { Text("Display either Overrides or Temp Targets") }
+
                 Section(header: Text("Garmin Watch")) {
                     List {
                         ForEach(state.devices, id: \.uuid) { device in
@@ -30,7 +44,7 @@ extension WatchConfig {
                     }
                 }
             }
-            .onAppear(perform: configureView)
+            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
             .navigationTitle("Watch Configuration")
             .navigationBarTitleDisplayMode(.automatic)
         }

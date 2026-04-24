@@ -4,7 +4,7 @@ import Swinject
 extension ISFEditor {
     struct RootView: BaseView {
         let resolver: Resolver
-        @StateObject var state = StateModel()
+        @StateObject var state: StateModel
         @State private var editMode = EditMode.inactive
 
         private var dateFormatter: DateFormatter {
@@ -21,9 +21,14 @@ extension ISFEditor {
             return formatter
         }
 
+        init(resolver: Resolver) {
+            self.resolver = resolver
+            _state = StateObject(wrappedValue: StateModel(resolver: resolver))
+        }
+
         var body: some View {
             Form {
-                if let autotune = state.autotune {
+                if let autotune = state.autotune, !state.settingsManager.settings.onlyAutotuneBasals {
                     Section(header: Text("Autotune")) {
                         HStack {
                             Text("Calculated Sensitivity")
@@ -38,16 +43,31 @@ extension ISFEditor {
                     }
                 }
                 if let newISF = state.autosensISF {
-                    Section(header: Text("Autosens")) {
+                    Section(
+                        header: !state.settingsManager.preferences
+                            .useNewFormula ? Text("Autosens") : Text("Dynamic Sensitivity")
+                    ) {
+                        let ratio = state.provider.suggestion?.sensitivityRatio ?? 0
+                        let isf = state.provider.sensitivity
                         HStack {
                             Text("Sensitivity Ratio")
                             Spacer()
-                            Text(rateFormatter.string(from: state.autosensRatio as NSNumber) ?? "1")
+                            Text(
+                                rateFormatter
+                                    .string(
+                                        from:
+                                        ratio
+                                            as NSNumber
+                                    ) ?? "1"
+                            )
                         }
                         HStack {
                             Text("Calculated Sensitivity")
                             Spacer()
-                            Text(rateFormatter.string(from: newISF as NSNumber) ?? "0")
+                            Text(
+                                rateFormatter
+                                    .string(from: isf ?? 0) ?? ""
+                            )
                             Text(state.units.rawValue + "/U").foregroundColor(.secondary)
                         }
                     }
@@ -68,7 +88,7 @@ extension ISFEditor {
                     .disabled(state.items.isEmpty)
                 }
             }
-            .onAppear(perform: configureView)
+            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
             .navigationTitle("Insulin Sensitivities")
             .navigationBarTitleDisplayMode(.automatic)
             .navigationBarItems(

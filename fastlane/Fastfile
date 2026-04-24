@@ -23,11 +23,28 @@ DEVICE_NAME = ENV["DEVICE_NAME"]
 DEVICE_ID = ENV["DEVICE_ID"]
 ENV["FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT"] = "120"
 
+APP_IDENTIFIER = ENV.fetch('APP_IDENTIFIER') { "ru.artpancreas.#{TEAMID}.FreeAPS" }
+
+if ENV['BUILD_GROUP']
+  File.write('../ConfigOverride.xcconfig', "COPYRIGHT_NOTICE = #{ENV['BUILD_GROUP']}\n", mode: 'a')
+end
+
+if #{APP_IDENTIFIER} != "ru.artpancreas.#{TEAMID}.FreeAPS"
+  File.write('../ConfigOverride.xcconfig', "BUNDLE_IDENTIFIER = #{APP_IDENTIFIER}\n", mode: 'a')
+end
+
+if File.exist?('../ConfigOverride.xcconfig')
+  contents = File.read('../ConfigOverride.xcconfig')
+  puts "=== File Contents: ../ConfigOverride.xcconfig ==="
+  puts contents
+  puts "====================="
+end
+
 platform :ios do
   desc "Build iAPS"
   lane :build_iAPS do
     setup_ci if ENV['CI']
-    
+
     update_project_team(
       path: "#{GITHUB_WORKSPACE}/FreeAPS.xcodeproj",
       teamid: "#{TEAMID}"
@@ -40,7 +57,7 @@ platform :ios do
     )
 
     previous_build_number = latest_testflight_build_number(
-      app_identifier: "ru.artpancreas.#{TEAMID}.FreeAPS",
+      app_identifier: "#{APP_IDENTIFIER}",
       api_key: api_key,
     )
 
@@ -55,14 +72,15 @@ platform :ios do
       type: "appstore",
       git_basic_authorization: Base64.strict_encode64("#{GITHUB_REPOSITORY_OWNER}:#{GH_PAT}"),
       app_identifier: [
-        "ru.artpancreas.#{TEAMID}.FreeAPS",
-        "ru.artpancreas.#{TEAMID}.FreeAPS.watchkitapp",
-        "ru.artpancreas.#{TEAMID}.FreeAPS.watchkitapp.watchkitextension"
+        "#{APP_IDENTIFIER}",
+        "#{APP_IDENTIFIER}.watchkitapp",
+        "#{APP_IDENTIFIER}.watchkitapp.watchkitextension",
+        "#{APP_IDENTIFIER}.LiveActivity"
       ]
     )
 
     previous_build_number = latest_testflight_build_number(
-      app_identifier: "ru.artpancreas.#{TEAMID}.FreeAPS",
+      app_identifier: "#{APP_IDENTIFIER}",
       api_key: api_key,
     )
 
@@ -79,28 +97,34 @@ platform :ios do
 
     update_code_signing_settings(
       path: "#{GITHUB_WORKSPACE}/FreeAPS.xcodeproj",
-      profile_name: mapping["ru.artpancreas.#{TEAMID}.FreeAPS"],
+      profile_name: mapping["#{APP_IDENTIFIER}"],
       code_sign_identity: "iPhone Distribution",
       targets: ["FreeAPS"]
     )
 
     update_code_signing_settings(
       path: "#{GITHUB_WORKSPACE}/FreeAPS.xcodeproj",
-      profile_name: mapping["ru.artpancreas.#{TEAMID}.FreeAPS.watchkitapp.watchkitextension"],
+      profile_name: mapping["#{APP_IDENTIFIER}.watchkitapp.watchkitextension"],
       code_sign_identity: "iPhone Distribution",
       targets: ["FreeAPSWatch WatchKit Extension"]
     )
     
     update_code_signing_settings(
       path: "#{GITHUB_WORKSPACE}/FreeAPS.xcodeproj",
-      profile_name: mapping["ru.artpancreas.#{TEAMID}.FreeAPS.watchkitapp"],
+      profile_name: mapping["#{APP_IDENTIFIER}.watchkitapp"],
       code_sign_identity: "iPhone Distribution",
       targets: ["FreeAPSWatch"]
+    )
+    update_code_signing_settings(
+      path: "#{GITHUB_WORKSPACE}/FreeAPS.xcodeproj",
+      profile_name: mapping["#{APP_IDENTIFIER}.LiveActivity"],
+      code_sign_identity: "iPhone Distribution",
+      targets: ["LiveActivityExtension"]
     )
 
     gym(
       export_method: "app-store",
-      scheme: "FreeAPS X",
+      scheme: "FreeAPSWorkspace",
       output_name: "iAPS.ipa",
       configuration: "Release",
       destination: 'generic/platform=iOS',
@@ -126,6 +150,7 @@ platform :ios do
       skip_submission: false,
       ipa: "iAPS.ipa",
       skip_waiting_for_build_processing: true,
+      changelog: git_branch+" "+last_git_commit[:abbreviated_commit_hash],
     )
   end
 
@@ -141,23 +166,33 @@ platform :ios do
     )
 
     def configure_bundle_id(name, identifier, capabilities)
-      bundle_id = Spaceship::ConnectAPI::BundleId.find(identifier) || Spaceship::ConnectAPI::BundleId.create(name: name, identifier: identifier)
-      capabilities.each { |capability|
-        bundle_id.create_capability(capability)
-      }
+      bundle_id = Spaceship::ConnectAPI::BundleId.find(identifier) || Spaceship::ConnectAPI::BundleId.create(
+        name:       name,
+        identifier: identifier,
+        platform:   "IOS"
+      )
+      existing = bundle_id.get_capabilities.map(&:capability_type)
+      capabilities.reject { |c| existing.include?(c) }.each do |cap|
+        bundle_id.create_capability(cap)
+      end
     end
 
-    configure_bundle_id("FreeAPS", "ru.artpancreas.#{TEAMID}.FreeAPS", [
+    configure_bundle_id("FreeAPS", "#{APP_IDENTIFIER}", [
       Spaceship::ConnectAPI::BundleIdCapability::Type::APP_GROUPS,
-      Spaceship::ConnectAPI::BundleIdCapability::Type::HEALTHKIT
+      Spaceship::ConnectAPI::BundleIdCapability::Type::HEALTHKIT,
+      Spaceship::ConnectAPI::BundleIdCapability::Type::NFC_TAG_READING
     ])
 
-    configure_bundle_id("FreeAPSWatch WatchKit Extension", "ru.artpancreas.#{TEAMID}.FreeAPS.watchkitapp.watchkitextension", [
+    configure_bundle_id("FreeAPSWatch WatchKit Extension", "#{APP_IDENTIFIER}.watchkitapp.watchkitextension", [
       Spaceship::ConnectAPI::BundleIdCapability::Type::APP_GROUPS,
       Spaceship::ConnectAPI::BundleIdCapability::Type::HEALTHKIT
     ])
     
-    configure_bundle_id("FreeAPSWatch", "ru.artpancreas.#{TEAMID}.FreeAPS.watchkitapp", [
+    configure_bundle_id("FreeAPSWatch", "#{APP_IDENTIFIER}.watchkitapp", [
+      Spaceship::ConnectAPI::BundleIdCapability::Type::APP_GROUPS
+    ])
+
+    configure_bundle_id("LiveActivityExtension", "#{APP_IDENTIFIER}.LiveActivity", [
       Spaceship::ConnectAPI::BundleIdCapability::Type::APP_GROUPS
     ])
     
@@ -176,12 +211,15 @@ platform :ios do
     
     match(
       type: "appstore",
-      force: true,
+      readonly: false,
+      force: false,
+      verbose: true,
       git_basic_authorization: Base64.strict_encode64("#{GITHUB_REPOSITORY_OWNER}:#{GH_PAT}"),
       app_identifier: [
-        "ru.artpancreas.#{TEAMID}.FreeAPS",
-        "ru.artpancreas.#{TEAMID}.FreeAPS.watchkitapp.watchkitextension",
-        "ru.artpancreas.#{TEAMID}.FreeAPS.watchkitapp",
+        "#{APP_IDENTIFIER}",
+        "#{APP_IDENTIFIER}.watchkitapp.watchkitextension",
+        "#{APP_IDENTIFIER}.watchkitapp",
+        "#{APP_IDENTIFIER}.LiveActivity"
       ]
     )
   end
@@ -201,7 +239,13 @@ platform :ios do
       bundle_id = Spaceship::ConnectAPI::BundleId.find(identifier)
     end
 
-    find_bundle_id("com.#{TEAMID}.loopkit.Loop")
+    find_bundle_id("#{APP_IDENTIFIER}")
+
+    match(
+      type: "appstore",
+      git_basic_authorization: Base64.strict_encode64("#{GITHUB_REPOSITORY_OWNER}:#{GH_PAT}"),
+      app_identifier: [],
+    )
   end
 
   desc "Nuke Certs"
@@ -221,5 +265,57 @@ platform :ios do
       skip_confirmation: true,
       git_basic_authorization: Base64.strict_encode64("#{GITHUB_REPOSITORY_OWNER}:#{GH_PAT}")
     )
+  end
+
+  desc "Check Certificates and Trigger Workflow for Expired or Missing Certificates"
+  lane :check_and_renew_certificates do
+    setup_ci if ENV['CI']
+    ENV["MATCH_READONLY"] = false.to_s
+  
+    # Authenticate using App Store Connect API Key
+    api_key = app_store_connect_api_key(
+      key_id: ENV["FASTLANE_KEY_ID"],
+      issuer_id: ENV["FASTLANE_ISSUER_ID"],
+      key_content: ENV["FASTLANE_KEY"] # Ensure valid key content
+    )
+  
+    # Initialize flag to track if renewal of certificates is needed
+    new_certificate_needed = false
+  
+    # Fetch all certificates
+    certificates = Spaceship::ConnectAPI::Certificate.all
+  
+    # Filter for Distribution Certificates
+    distribution_certs = certificates.select { |cert| cert.certificate_type == "DISTRIBUTION" }
+  
+    # Handle case where no distribution certificates are found
+    if distribution_certs.empty?
+      puts "No Distribution certificates found! Triggering action to create certificate."
+      new_certificate_needed = true
+    else
+      # Check for expiration
+      distribution_certs.each do |cert|
+        expiration_date = Time.parse(cert.expiration_date)
+  
+        puts "Current Distribution Certificate: #{cert.id}, Expiration date: #{expiration_date}"
+  
+        if expiration_date < Time.now
+          puts "Distribution Certificate #{cert.id} is expired! Triggering action to renew certificate."
+          new_certificate_needed = true
+        else
+          puts "Distribution certificate #{cert.id} is valid. No action required."
+        end
+      end
+    end
+  
+    # Write result to new_certificate_needed.txt
+    file_path = File.expand_path('new_certificate_needed.txt')
+    File.write(file_path, new_certificate_needed ? 'true' : 'false')  
+  
+    # Log the absolute path and contents of the new_certificate_needed.txt file
+    puts ""
+    puts "Absolute path of new_certificate_needed.txt: #{file_path}"
+    new_certificate_needed_content = File.read(file_path)
+    puts "Certificate creation or renewal needed: #{new_certificate_needed_content}"
   end
 end

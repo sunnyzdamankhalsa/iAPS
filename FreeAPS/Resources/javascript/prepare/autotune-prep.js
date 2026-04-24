@@ -1,6 +1,6 @@
 function generate(pumphistory_data, profile_data, glucose_data, pumpprofile_data, carb_data = {} , categorize_uam_as_basal = false, tune_insulin_curve = false) {
-    if (typeof(profile_data.carb_ratio) === 'undefined' || profile_data.carb_ratio < 2) {
-        if (typeof(pumpprofile_data.carb_ratio) === 'undefined' || pumpprofile_data.carb_ratio < 2) {
+    if (typeof(profile_data.carb_ratio) === 'undefined' || profile_data.carb_ratio < 0.1) {
+        if (typeof(pumpprofile_data.carb_ratio) === 'undefined' || pumpprofile_data.carb_ratio < 0.1) {
             console.log('{ "carbs": 0, "mealCOB": 0, "reason": "carb_ratios ' + profile_data.carb_ratio + ' and ' + pumpprofile_data.carb_ratio + ' out of bounds" }');
             return console.error("Error: carb_ratios " + profile_data.carb_ratio + ' and ' + pumpprofile_data.carb_ratio + " out of bounds");
         } else {
@@ -32,6 +32,15 @@ function generate(pumphistory_data, profile_data, glucose_data, pumpprofile_data
             return 0;
         }
     } );
+
+    /* A temporary fix to make all iAPS carb equivalents compatible with the Oref0 meal module. */
+    carb_data.forEach( carb => carb.created_at = carb.actualDate ? carb.actualDate : carb.created_at);
+    carb_data.forEach( carb => console.log("Carb entry " + carb.created_at + ", carbs: " + carb.carbs + ", entered by: " + carb.enteredBy ));
+    carb_data = carb_data.filter((carb) => carb.carbs >= 1);
+    carb_data.sort((a, b) => b.created_at - a.created_at);
+
+    /* oref0 autotune-prep module expects the timestamp to be in the created_at field */
+    pumphistory_data.forEach( entry => entry.created_at = entry.timestamp );
 
     inputs = {
       history: pumphistory_data

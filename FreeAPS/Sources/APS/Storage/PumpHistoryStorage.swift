@@ -26,15 +26,49 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
         injectServices(resolver)
     }
 
+    var concentration: (concentration: Double, increment: Double) {
+        CoreDataStorage().insulinConcentration()
+    }
+
     func storePumpEvents(_ events: [NewPumpEvent]) {
+        guard !events.isEmpty else { return }
+
+        let insulinConcentration = concentration
         processQueue.async {
+            let storedEvents = self.recent()
             let eventsToStore = events.flatMap { event -> [PumpHistoryEvent] in
                 let id = event.raw.md5String
                 switch event.type {
                 case .bolus:
                     guard let dose = event.dose else { return [] }
-                    let amount = Decimal(string: dose.unitsInDeliverableIncrements.description)
+                    var amount = Decimal(string: dose.unitsInDeliverableIncrements.description)
+
+                    if insulinConcentration.concentration != 1, var needingAdjustment = amount {
+                        needingAdjustment *= Decimal(insulinConcentration.concentration)
+                        amount = needingAdjustment
+                            .roundBolusIncrements(increment: insulinConcentration.concentration * 0.05)
+                    }
+
                     let minutes = Int((dose.endDate - dose.startDate).timeInterval / 60)
+                    if let duplicatedEvent = storedEvents
+                        .first(where: { x in
+                            Int(x.timestamp.timeIntervalSince1970) == Int(event.date.timeIntervalSince1970) && x.type == .bolus })
+                    {
+                        return [PumpHistoryEvent(
+                            id: duplicatedEvent.id,
+                            type: .bolus,
+                            timestamp: duplicatedEvent.timestamp,
+                            amount: amount,
+                            duration: minutes,
+                            durationMin: nil,
+                            rate: nil,
+                            temp: nil,
+                            carbInput: nil,
+                            isSMB: dose.automatic,
+                            isExternal: dose.manuallyEntered
+                        )]
+                    }
+
                     return [PumpHistoryEvent(
                         id: id,
                         type: .bolus,
@@ -44,12 +78,20 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
                         durationMin: nil,
                         rate: nil,
                         temp: nil,
-                        carbInput: nil
+                        carbInput: nil,
+                        isSMB: dose.automatic,
+                        isExternal: dose.manuallyEntered
                     )]
                 case .tempBasal:
                     guard let dose = event.dose else { return [] }
+                    var rate = Decimal(dose.unitsPerHour)
 
-                    let rate = Decimal(dose.unitsPerHour)
+                    // Eventual adjustment for concentration
+                    if insulinConcentration.concentration != 1, rate >= 0.05 {
+                        rate *= Decimal(insulinConcentration.concentration)
+                        rate = rate.roundBolusIncrements(increment: insulinConcentration.concentration * 0.05)
+                    }
+
                     let minutes = (dose.endDate - dose.startDate).timeInterval / 60
                     let delivered = dose.deliveredUnits
                     let date = event.date
@@ -209,6 +251,16 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
         }
     }
 
+    func determineBolusEventType(for event: PumpHistoryEvent) -> EventType {
+        if event.isSMB ?? false {
+            return .smb
+        }
+        if event.isExternal ?? false {
+            return .isExternal
+        }
+        return event.type
+    }
+
     func nightscoutTretmentsNotUploaded() -> [NigtscoutTreatment] {
         let events = recent()
         guard !events.isEmpty else { return [] }
@@ -230,6 +282,8 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
                     insulin: nil,
                     notes: nil,
                     carbs: nil,
+                    fat: nil,
+                    protein: nil,
                     targetTop: nil,
                     targetBottom: nil
                 ))
@@ -247,19 +301,22 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
         let bolusesAndCarbs = events.compactMap { event -> NigtscoutTreatment? in
             switch event.type {
             case .bolus:
+                let eventType = determineBolusEventType(for: event)
                 return NigtscoutTreatment(
                     duration: event.duration,
                     rawDuration: nil,
                     rawRate: nil,
                     absolute: nil,
                     rate: nil,
-                    eventType: .bolus,
+                    eventType: eventType,
                     createdAt: event.timestamp,
                     enteredBy: NigtscoutTreatment.local,
                     bolus: event,
                     insulin: event.amount,
                     notes: nil,
                     carbs: nil,
+                    fat: nil,
+                    protein: nil,
                     targetTop: nil,
                     targetBottom: nil
                 )
@@ -277,8 +334,11 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
                     insulin: nil,
                     notes: nil,
                     carbs: Decimal(event.carbInput ?? 0),
+                    fat: nil,
+                    protein: nil,
                     targetTop: nil,
-                    targetBottom: nil
+                    targetBottom: nil,
+                    creation_date: event.timestamp
                 )
             default: return nil
             }
@@ -300,6 +360,8 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
                     insulin: nil,
                     notes: nil,
                     carbs: nil,
+                    fat: nil,
+                    protein: nil,
                     targetTop: nil,
                     targetBottom: nil
                 )
@@ -317,6 +379,8 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
                     insulin: nil,
                     notes: nil,
                     carbs: nil,
+                    fat: nil,
+                    protein: nil,
                     targetTop: nil,
                     targetBottom: nil
                 )
@@ -334,6 +398,8 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
                     insulin: nil,
                     notes: "Alarm \(String(describing: event.note)) \(event.type)",
                     carbs: nil,
+                    fat: nil,
+                    protein: nil,
                     targetTop: nil,
                     targetBottom: nil
                 )

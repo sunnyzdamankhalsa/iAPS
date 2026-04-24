@@ -24,7 +24,6 @@ enum DataTable {
 
     enum DataType: String, Equatable {
         case carbs
-        case fpus
         case bolus
         case tempBasal
         case tempTarget
@@ -36,8 +35,6 @@ enum DataTable {
             switch self {
             case .carbs:
                 name = "Carbs"
-            case .fpus:
-                name = "Protein / Fat"
             case .bolus:
                 name = "Bolus"
             case .tempBasal:
@@ -60,16 +57,27 @@ enum DataTable {
         let units: GlucoseUnits
         let type: DataType
         let date: Date
+        let creationDate: Date
         let amount: Decimal?
         let secondAmount: Decimal?
         let duration: Decimal?
         let isFPU: Bool?
         let fpuID: String?
+        let note: String?
+        let isSMB: Bool?
+        let isExternal: Bool?
 
-        private var numberFormater: NumberFormatter {
+        private var numberFormatter: NumberFormatter {
             let formatter = NumberFormatter()
             formatter.numberStyle = .decimal
             formatter.maximumFractionDigits = 2
+            return formatter
+        }
+
+        private var tempTargetFormater: NumberFormatter {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.maximumFractionDigits = 1
             return formatter
         }
 
@@ -77,17 +85,22 @@ enum DataTable {
             units: GlucoseUnits,
             type: DataType,
             date: Date,
+            creationDate: Date,
             amount: Decimal? = nil,
             secondAmount: Decimal? = nil,
             duration: Decimal? = nil,
             id: String? = nil,
             idPumpEvent: String? = nil,
-            isFPU: Bool? = false,
-            fpuID: String? = nil
+            isFPU: Bool? = nil,
+            fpuID: String? = nil,
+            note: String? = nil,
+            isSMB: Bool? = nil,
+            isExternal: Bool? = nil
         ) {
             self.units = units
             self.type = type
             self.date = date
+            self.creationDate = creationDate
             self.amount = amount
             self.secondAmount = secondAmount
             self.duration = duration
@@ -95,6 +108,9 @@ enum DataTable {
             self.idPumpEvent = idPumpEvent
             self.isFPU = isFPU
             self.fpuID = fpuID
+            self.note = note
+            self.isSMB = isSMB
+            self.isExternal = isExternal
         }
 
         static func == (lhs: Treatment, rhs: Treatment) -> Bool {
@@ -116,14 +132,21 @@ enum DataTable {
 
             switch type {
             case .carbs:
-                return numberFormater.string(from: amount as NSNumber)! + NSLocalizedString(" g", comment: "gram of carbs")
-            case .fpus:
-                return numberFormater
-                    .string(from: amount as NSNumber)! + NSLocalizedString(" g", comment: "gram of carb equilvalents")
+                return numberFormatter
+                    .string(from: amount as NSNumber)! + NSLocalizedString(" g", comment: "gram of carbs")
             case .bolus:
-                return numberFormater.string(from: amount as NSNumber)! + NSLocalizedString(" U", comment: "Insulin unit")
+                var bolusText = " "
+                if isSMB ?? false {}
+                else if isExternal ?? false {
+                    bolusText += NSLocalizedString("External", comment: "External Insulin")
+                } else {
+                    bolusText += NSLocalizedString("Manual", comment: "Manual Bolus")
+                }
+
+                return numberFormatter
+                    .string(from: amount as NSNumber)! + NSLocalizedString(" U", comment: "Insulin unit") + bolusText
             case .tempBasal:
-                return numberFormater
+                return numberFormatter
                     .string(from: amount as NSNumber)! + NSLocalizedString(" U/hr", comment: "Unit insulin per hour")
             case .tempTarget:
                 var converted = amount
@@ -132,13 +155,13 @@ enum DataTable {
                 }
 
                 guard var secondAmount = secondAmount else {
-                    return numberFormater.string(from: converted as NSNumber)! + " \(units.rawValue)"
+                    return numberFormatter.string(from: converted as NSNumber)! + " \(units.rawValue)"
                 }
                 if units == .mmolL {
                     secondAmount = secondAmount.asMmolL
                 }
 
-                return numberFormater.string(from: converted as NSNumber)! + " - " + numberFormater
+                return tempTargetFormater.string(from: converted as NSNumber)! + " - " + tempTargetFormater
                     .string(from: secondAmount as NSNumber)! + " \(units.rawValue)"
             case .resume,
                  .suspend:
@@ -150,12 +173,10 @@ enum DataTable {
             switch type {
             case .carbs:
                 return .loopYellow
-            case .fpus:
-                return .red
             case .bolus:
-                return .insulin
+                return Color.insulin
             case .tempBasal:
-                return Color.insulin.opacity(0.5)
+                return Color.insulin.opacity(0.4)
             case .resume,
                  .suspend,
                  .tempTarget:
@@ -167,7 +188,7 @@ enum DataTable {
             guard let duration = duration, duration > 0 else {
                 return nil
             }
-            return numberFormater.string(from: duration as NSNumber)! + " min"
+            return numberFormatter.string(from: duration as NSNumber)! + " min"
         }
     }
 
@@ -191,7 +212,7 @@ protocol DataTableProvider: Provider {
     func tempTargets() -> [TempTarget]
     func carbs() -> [CarbsEntry]
     func glucose() -> [BloodGlucose]
-    func deleteCarbs(_ treatement: DataTable.Treatment)
+    func deleteCarbs(_ date: Date)
     func deleteInsulin(_ treatement: DataTable.Treatment)
     func deleteGlucose(id: String)
 }
