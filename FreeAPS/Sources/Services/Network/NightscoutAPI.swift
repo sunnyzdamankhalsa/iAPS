@@ -16,11 +16,11 @@ class NightscoutAPI {
         static let treatmentsPath = "/api/v1/treatments.json"
         static let statusPath = "/api/v1/devicestatus.json"
         static let profilePath = "/api/v1/profile.json"
-        static let uploadStatisticsPath    = "/api/v1/upload/statistics"
-        static let uploadPreferencesPath   = "/api/v1/upload/preferences"
-        static let uploadSettingsPath      = "/api/v1/upload/settings"
-        static let uploadProfilesPath      = "/api/v1/upload/profiles"
-        static let versionPath             = "/api/v1/version_check"
+        static let uploadStatisticsPath = "/api/v1/upload/statistics"
+        static let uploadPreferencesPath = "/api/v1/upload/preferences"
+        static let uploadSettingsPath = "/api/v1/upload/settings"
+        static let uploadProfilesPath = "/api/v1/upload/profiles"
+        static let versionPath = "/api/v1/version_check"
         static let retryCount = 2
         static let timeout: TimeInterval = 60
     }
